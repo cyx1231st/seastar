@@ -294,6 +294,8 @@ seastar_find_dependencies ()
 
 # Private build dependencies not visible to consumers
 find_package (ragel 6.10 REQUIRED)
+find_package (Threads REQUIRED)
+find_package (PthreadSetName REQUIRED)
 
 #
 # Code generation helpers.
@@ -677,7 +679,8 @@ target_link_libraries (seastar
     lksctp-tools::lksctp-tools
     protobuf::libprotobuf
     rt::rt
-    yaml-cpp::yaml-cpp)
+    yaml-cpp::yaml-cpp
+    Threads::Threads)
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"))
   if (Sanitizers_FOUND)

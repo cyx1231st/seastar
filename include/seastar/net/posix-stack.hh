@@ -106,7 +106,7 @@ class posix_data_source_impl final : public data_source_impl {
     temporary_buffer<char> _buf;
     size_t _buf_size;
 public:
-    explicit posix_data_source_impl(lw_shared_ptr<pollable_fd> fd, size_t buf_size = 8192)
+    explicit posix_data_source_impl(lw_shared_ptr<pollable_fd> fd, size_t buf_size = 65536)
         : _fd(std::move(fd)), _buf(buf_size), _buf_size(buf_size) {}
     future<temporary_buffer<char>> get() override;
     future<> close() override;

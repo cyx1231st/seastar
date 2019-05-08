@@ -112,6 +112,7 @@ public:
         size_t buf_size = 8192) : _buffer_allocator(allocator), _fd(std::move(fd)),
         _buf(make_temporary_buffer<char>(_buffer_allocator, buf_size)), _buf_size(buf_size) {}
     future<temporary_buffer<char>> get() override;
+    future<size_t, temporary_buffer<char>> get_direct(char* buf, size_t size) override;
     future<> close() override;
 };
 

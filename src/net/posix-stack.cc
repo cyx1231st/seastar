@@ -325,6 +325,21 @@ posix_data_source_impl::get() {
     });
 }
 
+future<size_t, temporary_buffer<char>>
+posix_data_source_impl::get_direct(char* buf, size_t size) {
+    if (size > _buf_size / 2) {
+        // this was a large read, we don't prefetch
+        return _fd->read_some(buf, size).then([] (auto read_size) {
+            return make_ready_future<size_t, temporary_buffer<char>>(
+                read_size, temporary_buffer<char>());
+        });
+    } else {
+        // read with prefetch, but with extra memory copy,
+        // because we prefer less system calls.
+        return data_source_impl::get_direct(buf, size);
+    }
+}
+
 future<> posix_data_source_impl::close() {
     _fd->shutdown(SHUT_RD);
     return make_ready_future<>();

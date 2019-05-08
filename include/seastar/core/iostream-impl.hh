@@ -27,6 +27,7 @@
 #include <seastar/net/packet.hh>
 #include <seastar/core/future-util.hh>
 #include <seastar/util/variant_utils.hh>
+#include <iostream>
 
 namespace seastar {
 
@@ -189,6 +190,54 @@ input_stream<CharType>::read_exactly(size_t n) {
         // buffer too small: start copy/read loop
         tmp_buf b(n);
         return read_exactly_part(n, std::move(b), 0);
+    }
+}
+
+template <typename CharType>
+future<temporary_buffer<CharType>>
+input_stream<CharType>::read_exactly_part2(size_t n, tmp_buf out, size_t completed) {
+    assert(!available() && "Still available buffer left");
+    if (completed == n) {
+        return make_ready_future<tmp_buf>(std::move(out));
+    }
+
+    return _fd.get2(out.get_write() + completed, n - completed)
+    .then([this, n, out = std::move(out), completed] (auto size) mutable {
+        if (size == 0) {
+            _eof = true;
+            return make_ready_future<tmp_buf>();
+        }
+        return this->read_exactly_part2(n, std::move(out), completed + size);
+    });
+}
+
+template <typename CharType>
+future<temporary_buffer<CharType>>
+input_stream<CharType>::read_exactly2(size_t n) {
+    if (_buf.size() == n) {
+        // easy case: steal buffer, return to caller
+        return make_ready_future<tmp_buf>(std::move(_buf));
+    } else if (_buf.size() > n) {
+        // buffer large enough, share it with caller
+        auto front = _buf.share(0, n);
+        _buf.trim_front(n);
+        return make_ready_future<tmp_buf>(std::move(front));
+    } else if (_buf.size() == 0) {
+        // buffer is empty: use out buffer
+        tmp_buf out(n);
+        return read_exactly_part2(n, std::move(out), 0);
+    } else {
+        // buffer too small: copy to out buffer
+        tmp_buf out(n);
+        auto completed = available();
+        std::copy(_buf.get(), _buf.get() + completed, out.get_write());
+        _buf.trim_front(completed);
+        /*
+        std::stringstream sout;
+        sout << completed << "\n";
+        std::cout << sout.str();
+        */
+        return read_exactly_part2(n, std::move(out), completed);
     }
 }
 

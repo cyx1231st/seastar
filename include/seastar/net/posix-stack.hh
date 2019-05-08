@@ -109,6 +109,7 @@ public:
     explicit posix_data_source_impl(lw_shared_ptr<pollable_fd> fd, size_t buf_size = 65536)
         : _fd(std::move(fd)), _buf(buf_size), _buf_size(buf_size) {}
     future<temporary_buffer<char>> get() override;
+    future<size_t> get2(char* buf, size_t size) override;
     future<> close() override;
 };
 

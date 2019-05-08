@@ -48,6 +48,9 @@ class data_source_impl {
 public:
     virtual ~data_source_impl() {}
     virtual future<temporary_buffer<char>> get() = 0;
+    virtual future<size_t> get2(char* buf, size_t size) {
+        throw std::logic_error("get2() not supported");
+    }
     virtual future<temporary_buffer<char>> skip(uint64_t n);
     virtual future<> close() { return make_ready_future<>(); }
 };
@@ -62,6 +65,7 @@ public:
     data_source(data_source&& x) = default;
     data_source& operator=(data_source&& x) = default;
     future<temporary_buffer<char>> get() { return _dsi->get(); }
+    future<size_t> get2(char* buf, size_t size) { return _dsi->get2(buf, size); }
     future<temporary_buffer<char>> skip(uint64_t n) { return _dsi->skip(n); }
     future<> close() { return _dsi->close(); }
 };
@@ -214,6 +218,13 @@ public:
     input_stream(input_stream&&) = default;
     input_stream& operator=(input_stream&&) = default;
     future<temporary_buffer<CharType>> read_exactly(size_t n);
+    // Less copy version, only support posix_data_source_impl now.
+    //
+    // Not supported:
+    // tls_connected_socket_impl file_data_source_impl
+    // loopback_data_source_impl packet_data_source
+    // native_data_source_impl
+    future<temporary_buffer<CharType>> read_exactly2(size_t n);
     template <typename Consumer>
     GCC6_CONCEPT(requires InputStreamConsumer<Consumer, CharType> || ObsoleteInputStreamConsumer<Consumer, CharType>)
     future<> consume(Consumer&& c);
@@ -256,6 +267,7 @@ public:
     data_source detach() &&;
 private:
     future<temporary_buffer<CharType>> read_exactly_part(size_t n, tmp_buf buf, size_t completed);
+    future<temporary_buffer<CharType>> read_exactly_part2(size_t n, tmp_buf buf, size_t completed);
 };
 
 // Facilitates data buffering before it's handed over to data_sink.

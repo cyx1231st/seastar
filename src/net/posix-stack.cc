@@ -321,6 +321,10 @@ posix_data_source_impl::get() {
     });
 }
 
+future<size_t> posix_data_source_impl::get2(char* buf, size_t size) {
+    return _fd->read_some(buf, size);
+}
+
 future<> posix_data_source_impl::close() {
     _fd->shutdown(SHUT_RD);
     return make_ready_future<>();

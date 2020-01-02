@@ -2004,12 +2004,15 @@ dpdk_qp<false>::from_mbuf_lro(rte_mbuf* m)
         }
 
         rte_pktmbuf_free(m);
+        printf("[rx qp packet] from_mbuf_lro(): copy %d bytes to %lx\n",
+               pkt_len, (uint64_t)buf);
 
         return packet(fragment{buf, pkt_len}, make_free_deleter(buf));
     }
 
     // Drop if allocation failed
     rte_pktmbuf_free(m);
+    printf("[? rx qp packet]");
 
     return compat::nullopt;
 }
@@ -2031,11 +2034,14 @@ dpdk_qp<false>::from_mbuf(rte_mbuf* m)
         if (!buf) {
             // Drop if allocation failed
             rte_pktmbuf_free(m);
+            printf("[? rx qp packet]");
 
             return compat::nullopt;
         } else {
             rte_memcpy(buf, rte_pktmbuf_mtod(m, char*), len);
             rte_pktmbuf_free(m);
+            printf("[rx qp packet] from_mbuf(): copy %d bytes to %lx\n",
+                   len, (uint64_t)buf);
 
             return packet(fragment{buf, len}, make_free_deleter(buf));
         }
@@ -2070,6 +2076,7 @@ dpdk_qp<true>::from_mbuf_lro(rte_mbuf* m)
 template<>
 inline compat::optional<packet> dpdk_qp<true>::from_mbuf(rte_mbuf* m)
 {
+    printf("[? rx qp packet]");
     _rx_free_pkts.push_back(m);
     _num_rx_free_segs += m->nb_segs;
 
@@ -2146,6 +2153,8 @@ void dpdk_qp<HugetlbfsMemBackend>::process_packets(
 {
     uint64_t nr_frags = 0, bytes = 0;
 
+    printf("[rx qp @%d] process_packets(): start %d rte_mbufs\n", _qid, count);
+
     for (uint16_t i = 0; i < count; i++) {
         struct rte_mbuf *m = bufs[i];
         offload_info oi;
@@ -2155,6 +2164,7 @@ void dpdk_qp<HugetlbfsMemBackend>::process_packets(
         // Drop the packet if translation above has failed
         if (!p) {
             _stats.rx.bad.inc_no_mem();
+            printf("[? rx qp packet]");
             continue;
         }
 
@@ -2165,6 +2175,7 @@ void dpdk_qp<HugetlbfsMemBackend>::process_packets(
         if ((m->ol_flags & PKT_RX_VLAN_STRIPPED) &&
             (m->ol_flags & PKT_RX_VLAN)) {
 
+            printf("[? rx qp packet]");
             oi.vlan_tci = m->vlan_tci;
         }
 
@@ -2172,6 +2183,7 @@ void dpdk_qp<HugetlbfsMemBackend>::process_packets(
             if (m->ol_flags & (PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD)) {
                 // Packet with bad checksum, just drop it.
                 _stats.rx.bad.inc_csum_err();
+                printf("[? rx qp packet]");
                 continue;
             }
             // Note that when _hw_features.rx_csum_offload is on, the receive
@@ -2184,11 +2196,16 @@ void dpdk_qp<HugetlbfsMemBackend>::process_packets(
             (*p).set_rss_hash(m->hash.rss);
         }
 
+        printf("[rx qp packet =>] deliver to device (rss_hash=%x)\n",
+               p->rss_hash().value_or(0xffff));
         _dev->l2receive(std::move(*p));
     }
 
     _stats.rx.good.update_pkts_bunch(count);
     _stats.rx.good.update_frags_stats(nr_frags, bytes);
+
+    printf("[rx qp] process_packets(): done %d rte_mbufs, with %ld frags, %ld bytes\n",
+           count, nr_frags, bytes);
 
     if (!HugetlbfsMemBackend) {
         _stats.rx.good.copy_frags = _stats.rx.good.nr_frags;

@@ -115,6 +115,7 @@ future<>
 ipv4::handle_received_packet(packet p, ethernet_address from) {
     auto iph = p.get_header<ip_hdr>(0);
     if (!iph) {
+        printf("[? rx ipv4] handle_recieved_packet() no iph\n");
         return make_ready_future<>();
     }
 
@@ -128,6 +129,16 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
     }
 
     auto h = ntoh(*iph);
+    std::cout << "[rx ipv4] handle_recieved_packet(): packet(ip_hdr) from "
+              << h.src_ip << " to "
+              << h.dst_ip << ", len="
+              << h.len << ", hdr_len="
+              << h.ihl * 4 << ", offset="
+              << h.offset() << ", mf="
+              << h.mf() << ", id="
+              << h.id << ", proto(ip_protocol_num)=0x"
+              << std::hex << (uint32_t)h.ip_proto << std::dec
+              << std::endl;
     unsigned ip_len = h.len;
     unsigned ip_hdr_len = h.ihl * 4;
     unsigned pkt_len = p.len();
@@ -135,12 +146,18 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
     if (pkt_len > ip_len) {
         // Trim extra data in the packet beyond IP total length
         p.trim_back(pkt_len - ip_len);
+        std::cout << "[? rx ipv4] handle_recieved_packet() pkt too long: pkt_len="
+                  << pkt_len << " > ip_len="
+                  << ip_len <<", trimed"
+                  << std::endl;
     } else if (pkt_len < ip_len) {
         // Drop if it contains less than IP total length
+        printf("[? rx ipv4] handle_recieved_packet() pkt too short\n");
         return make_ready_future<>();
     }
     // Drop if the reassembled datagram will be larger than maximum IP size
     if (offset + p.len() > net::ip_packet_len_max) {
+        printf("[? rx ipv4] handle_recieved_packet() pkt exceed max %d\n", net::ip_packet_len_max); // 65535
         return make_ready_future<>();
     }
 
@@ -150,21 +167,25 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
     }
 
     if (_packet_filter) {
+        printf("[? rx ipv4] handle_recieved_packet() filter packet ...\n");
         bool handled = false;
         auto r = _packet_filter->handle(p, &h, from, handled);
         if (handled) {
+            printf("[? rx ipv4] handle_recieved_packet() pkt filtered\n");
             return r;
         }
     }
 
     if (h.dst_ip != _host_address) {
         // FIXME: forward
+        printf("[? rx ipv4] handle_recieved_packet() dest ip is not me\n");
         return make_ready_future<>();
     }
 
     // Does this IP datagram need reassembly
     auto mf = h.mf();
     if (mf == true || offset != 0) {
+        printf("[? rx ipv4] handle_recieved_packet() merging fragments ...\n");
         frag_limit_mem();
         auto frag_id = ipv4_frag_id{h.src_ip, h.dst_ip, h.id, h.ip_proto};
         auto& frag = _frags[frag_id];
@@ -220,6 +241,7 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
     if (l4) {
         // Trim IP header and pass to upper layer
         p.trim_front(ip_hdr_len);
+        printf("[rx ipv4 =>] deliver to l4\n");
         l4->received(std::move(p), h.src_ip, h.dst_ip);
     }
     return make_ready_future<>();

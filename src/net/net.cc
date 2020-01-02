@@ -315,6 +315,11 @@ void interface::forward(unsigned cpuid, packet p) {
 
 future<> interface::dispatch_packet(packet p) {
     auto eh = p.get_header<eth_hdr>();
+    std::cout << "[rx interface] dispatch_packet(): packet(eth_hdr) from "
+              << eh->src_mac << " to "
+              << eh->dst_mac << ", proto(eth_protocol_num) 0x"
+              << std::hex << ntoh(eh->eth_proto) << std::dec
+              << std::endl;
     if (eh) {
         auto i = _proto_map.find(ntoh(eh->eth_proto));
         if (i != _proto_map.end()) {
@@ -332,6 +337,7 @@ future<> interface::dispatch_packet(packet p) {
                 }
             });
             if (fw != engine().cpu_id()) {
+                printf("[? rx interface] dispatch_packet() forwarded\n");
                 forward(fw, std::move(p));
             } else {
                 auto h = ntoh(*eh);
@@ -340,10 +346,17 @@ future<> interface::dispatch_packet(packet p) {
                 // avoid chaining, since queue lenth is unlimited
                 // drop instead.
                 if (l3.ready.available()) {
+                    printf("[rx interface =>] deliver to l3\n");
                     l3.ready = l3.packet_stream.produce(std::move(p), from);
+                } else {
+                    printf("[? rx interface] dispatch_packet() l3 dropped\n");
                 }
             }
+        } else {
+          printf("[? rx interface] dispatch_packet() no protocol\n");
         }
+    } else {
+      printf("[? rx interface] dispatch_packet() no eth_hdr\n");
     }
     return make_ready_future<>();
 }

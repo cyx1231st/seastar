@@ -854,11 +854,13 @@ template <typename InetTraits>
 void tcp<InetTraits>::received(packet p, ipaddr from, ipaddr to) {
     auto th = p.get_header(0, tcp_hdr::len);
     if (!th) {
+        printf("[? rx tcp] received() no header\n");
         return;
     }
     // data_offset is correct even before ntoh()
     auto data_offset = uint8_t(th[12]) >> 4;
     if (size_t(data_offset * 4) < tcp_hdr::len) {
+        printf("[? rx tcp] received() header too short\n");
         return;
     }
 
@@ -867,14 +869,20 @@ void tcp<InetTraits>::received(packet p, ipaddr from, ipaddr to) {
         InetTraits::tcp_pseudo_header_checksum(csum, from, to, p.len());
         csum.sum(p);
         if (csum.get() != 0) {
+            printf("[? rx tcp] received() checksum failed\n");
             return;
         }
     }
     auto h = tcp_hdr::read(th);
+    std::cout << "[rx tcp] recieved(): packet(tcp_hdr) src_port="
+              << h.src_port << ", dst_port="
+              << h.dst_port << ", ..."
+              << std::endl;
     auto id = connid{to, from, h.dst_port, h.src_port};
     auto tcbi = _tcbs.find(id);
     lw_shared_ptr<tcb> tcbp;
     if (tcbi == _tcbs.end()) {
+        printf("[? rx tcp] received() no tcb\n");
         auto listener = _listening.find(id.local_port);
         if (listener == _listening.end() || listener->second->full()) {
             // 1) In CLOSE state
@@ -920,6 +928,7 @@ void tcp<InetTraits>::received(packet p, ipaddr from, ipaddr to) {
         tcbp = tcbi->second;
         if (tcbp->state() == tcp_state::SYN_SENT) {
             // 3) In SYN_SENT State
+            printf("[? rx tcp] received() tcb SYN_SENT\n");
             return tcbp->input_handle_syn_sent_state(&h, std::move(p));
         } else {
             // 4) In other state, can be one of the following:
@@ -1211,12 +1220,14 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
     // 4.1 first check sequence number
     if (!segment_acceptable(seg_seq, seg_len)) {
         //<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
+        printf("[? rx tcb] handle_other..() seq not acceptable\n");
         return output();
     }
 
     // In the following it is assumed that the segment is the idealized
     // segment that begins at RCV.NXT and does not exceed the window.
     if (seg_seq < _rcv.next) {
+        printf("[? rx tcb] handle_other..() trim acknowledged\n");
         // ignore already acknowledged data
         auto dup = std::min(uint32_t(_rcv.next - seg_seq), seg_len);
         p.trim_front(dup);
@@ -1226,6 +1237,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
     // FIXME: We should trim data outside the right edge of the receive window as well
 
     if (seg_seq != _rcv.next) {
+        printf("[? rx tcb] handle_other..() out of order\n");
         insert_out_of_order(seg_seq, std::move(p));
         // A TCP receiver SHOULD send an immediate duplicate ACK
         // when an out-of-order segment arrives.
@@ -1235,6 +1247,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
     // 4.2 second check the RST bit
     if (th->f_rst) {
         if (in_state(SYN_RECEIVED)) {
+            printf("[? rx tcb] handle_other..() reset\n");
             // If this connection was initiated with a passive OPEN (i.e.,
             // came from the LISTEN state), then return this connection to
             // LISTEN state and return.  The user need not be informed.  If
@@ -1248,6 +1261,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
             return do_reset();
         }
         if (in_state(ESTABLISHED | FIN_WAIT_1 | FIN_WAIT_2 | CLOSE_WAIT)) {
+            printf("[? rx tcb] handle_other..() reset\n");
             // If the RST bit is set then, any outstanding RECEIVEs and SEND
             // should receive "reset" responses.  All segment queues should be
             // flushed.  Users should also receive an unsolicited general
@@ -1256,6 +1270,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
             return do_reset();
         }
         if (in_state(CLOSING | LAST_ACK | TIME_WAIT)) {
+            printf("[? rx tcb] handle_other..() close\n");
             // If the RST bit is set then, enter the CLOSED state, delete the
             // TCB, and return.
             return do_closed();
@@ -1267,6 +1282,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
 
     // 4.4 fourth, check the SYN bit
     if (th->f_syn) {
+        printf("[? rx tcb] handle_other..() reset\n");
         // SYN_RECEIVED, ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2
         // CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT
 
@@ -1285,6 +1301,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
 
     // 4.5 fifth check the ACK field
     if (!th->f_ack) {
+        printf("[? rx tcb] handle_other..() ACK if off\n");
         // if the ACK bit is off drop the segment and return
         return;
     } else {
@@ -1297,6 +1314,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
                 do_established();
                 _tcp.add_connected_tcb(this->shared_from_this(), _local_port);
             } else {
+                printf("[? rx tcb] handle_other..() reset\n");
                 // <SEQ=SEG.ACK><CTL=RST>
                 return respond_with_reset(th);
             }
@@ -1423,6 +1441,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
                     do_output_data = true;
                 }
             } else if (seg_ack > _snd.next) {
+                printf("[? rx tcb] handle_other..() drop\n");
                 // If the ACK acks something not yet sent (SEG.ACK > SND.NXT)
                 // then send an ACK, drop the segment, and return
                 return output();
@@ -1451,6 +1470,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
         }
         // CLOSING STATE
         if (in_state(CLOSING)) {
+            printf("[? rx tcb] handle_other..() closing\n");
             if (seg_ack == _snd.next + 1) {
                 tcp_debug("ack: CLOSING -> TIME_WAIT\n");
                 do_local_fin_acked();
@@ -1462,6 +1482,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
         // LAST_ACK STATE
         if (in_state(LAST_ACK)) {
             if (seg_ack == _snd.next + 1) {
+                printf("[? rx tcb] handle_other..() LAST_ACK\n");
                 tcp_debug("ack: LAST_ACK -> CLOSED\n");
                 do_local_fin_acked();
                 return do_closed();
@@ -1493,6 +1514,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
             _rcv.next += seg_len;
             auto merged = merge_out_of_order();
             _rcv.window = get_modified_receive_window_size();
+            printf("[rx tcb] handle_other..() signal received (1)\n");
             signal_data_received();
             // Send an acknowledgment of the form:
             // <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
@@ -1506,8 +1528,11 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
             } else {
                 do_output = should_send_ack(seg_len);
             }
+        } else {
+            printf("[? rx tcb] handle_other..() packet is empty\n");
         }
     } else if (in_state(CLOSE_WAIT | CLOSING | LAST_ACK | TIME_WAIT)) {
+        printf("[? rx tcb] handle_other..() should not happen\n");
         // This should not occur, since a FIN has been received from the
         // remote side. Ignore the segment text.
         return;
@@ -1516,6 +1541,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
     // 4.8 eighth, check the FIN bit
     if (th->f_fin) {
         if (in_state(CLOSED | LISTEN | SYN_SENT)) {
+            printf("[? rx tcb] handle_other..() drop\n");
             // Do not process the FIN if the state is CLOSED, LISTEN or SYN-SENT
             // since the SEG.SEQ cannot be validated; drop the segment and return.
             return;
@@ -1523,6 +1549,7 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
         auto fin_seq = seg_seq + seg_len;
         if (fin_seq == _rcv.next) {
             _rcv.next = fin_seq + 1;
+            printf("[? rx tcb] handle_other..() signal received (2)\n");
             signal_data_received();
 
             // If this <FIN> packet contains data as well, we can ACK both data
@@ -1549,6 +1576,8 @@ void tcp<InetTraits>::tcb::input_handle_other_state(tcp_hdr* th, packet p) {
                 tcp_debug("fin: FIN_WAIT_2 -> TIME_WAIT\n");
                 return do_time_wait();
             }
+        } else {
+            printf("[? rx tcb] handle_other..() ?\n");
         }
     }
     if (do_output || (do_output_data && can_send())) {

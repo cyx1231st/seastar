@@ -2034,6 +2034,17 @@ dpdk_qp<false>::from_mbuf(rte_mbuf* m)
 
             return compat::nullopt;
         } else {
+            std::cout << "[rc qp] from_mbuf()::pkt("
+                      << "data_len=" << len
+                      << "; nb_segs=" << m->nb_segs
+                      << ", port=" << m->port
+                      << ", pkt_len=" << m->pkt_len
+                      << ", buf_len=" << m->buf_len
+                      << ", priv_size=" << m->priv_size
+                      << ", seqn=" << m->seqn
+                      << ", this=0x" << std::hex << (uint64_t)m
+                      << ", next=0x" << (uint64_t)m->next << std::dec
+                      << ")" << std::endl;
             rte_memcpy(buf, rte_pktmbuf_mtod(m, char*), len);
             rte_pktmbuf_free(m);
 
@@ -2051,11 +2062,34 @@ dpdk_qp<true>::from_mbuf_lro(rte_mbuf* m)
     _frags.clear();
     _bufs.clear();
 
+    std::cout << "[rc qp] from_mbuf_lro() started..." << std::endl;
+    size_t total = 0;
+
     for (; m != nullptr; m = m->next) {
         char* data = rte_pktmbuf_mtod(m, char*);
 
         _frags.emplace_back(fragment{data, rte_pktmbuf_data_len(m)});
         _bufs.push_back(data);
+
+        auto len = rte_pktmbuf_data_len(m);
+        total += len;
+        std::cout << "[rc qp] from_mbuf_lro()::fragment("
+                  << "data_len=" << len
+                  << ", nr_frags="  << _frags.size()
+                  << ", total_size=" << total
+                  << "; nb_segs=" << m->nb_segs
+                  << ", port=" << m->port
+                  << ", pkt_len=" << m->pkt_len
+                  << ", buf_len=" << m->buf_len
+                  << ", priv_size=" << m->priv_size
+                  << ", seqn=" << m->seqn
+                  << ", this=0x" << std::hex << (uint64_t)m
+                  << ", next=0x" << (uint64_t)m->next << std::dec
+                  << ")" << std::endl;
+        if (_frags.size() > 16) {
+            std::cout << "too large" << std::endl;
+            exit(1);
+        }
     }
 
     return packet(_frags.begin(), _frags.end(),
@@ -2075,8 +2109,20 @@ inline compat::optional<packet> dpdk_qp<true>::from_mbuf(rte_mbuf* m)
 
     if (!_dev->hw_features_ref().rx_lro || rte_pktmbuf_is_contiguous(m)) {
         char* data = rte_pktmbuf_mtod(m, char*);
+        auto len = rte_pktmbuf_data_len(m);
+        std::cout << "[rc qp] from_mbuf()::pkt("
+                  << "data_len=" << len
+                  << "; nb_segs=" << m->nb_segs
+                  << ", port=" << m->port
+                  << ", pkt_len=" << m->pkt_len
+                  << ", buf_len=" << m->buf_len
+                  << ", priv_size=" << m->priv_size
+                  << ", seqn=" << m->seqn
+                  << ", this=0x" << std::hex << (uint64_t)m
+                  << ", next=0x" << (uint64_t)m->next << std::dec
+                  << ")" << std::endl;
 
-        return packet(fragment{data, rte_pktmbuf_data_len(m)},
+        return packet(fragment{data, len},
                       make_free_deleter(data));
     } else {
         return from_mbuf_lro(m);

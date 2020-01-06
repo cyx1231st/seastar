@@ -30,6 +30,7 @@ file_desc::temporary(sstring directory) {
     // FIXME: add O_TMPFILE support one day
     directory += "/XXXXXX";
     std::vector<char> templat(directory.c_str(), directory.c_str() + directory.size() + 1);
+    printf("[init] mktemp: %s\n", templat.data());
     int fd = ::mkstemp(templat.data());
     throw_system_error_on(fd == -1);
     int r = ::unlink(templat.data());

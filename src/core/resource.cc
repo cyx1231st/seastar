@@ -143,6 +143,8 @@ size_t calculate_memory(configuration c, size_t available_memory, float panic_fa
     if (mem > available_memory) {
         throw std::runtime_error(format("insufficient physical memory: needed {} available {}", mem, available_memory));
     }
+    std::cout << "\n       reserve=" << (double)reserve/1024/1024/1024 << " GiB"
+              << "\n       mem=" << (double)mem/1024/1024/1024 << " GiB";
     return mem;
 }
 
@@ -362,6 +364,9 @@ resources allocate(configuration c) {
 #else
     auto available_memory = machine->memory.total_memory;
 #endif
+    std::cout << "[init] allocate(hwloc=on):"
+              << "\n       available_memory=" << (double)available_memory/1024/1024/1024 << " GiB"
+              << "\n       memory_limit=" << (double)cgroup::memory_limit()/1024/1024/1024 << " GiB";
     size_t mem = calculate_memory(c, std::min(available_memory,
                                               cgroup::memory_limit()));
     unsigned available_procs = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);
@@ -370,6 +375,8 @@ resources allocate(configuration c) {
         throw std::runtime_error("insufficient processing units");
     }
     auto mem_per_proc = align_down<size_t>(mem / procs, 2 << 20);
+    std::cout << "\n       available_procs=" << available_procs
+              << "\n       mem_per_proc=" << (double)mem_per_proc/1024/1024/1024 << " GiB";
 
     resources ret;
     std::unordered_map<hwloc_obj_t, size_t> topo_used_mem;
@@ -413,12 +420,42 @@ resources allocate(configuration c) {
         ret.cpus.push_back(std::move(this_cpu));
     }
 
+    for (auto& cpu : ret.cpus) {
+        std::cout << "\n       cpu(" << cpu.cpu_id << "):";
+        for (auto& mem : cpu.mem) {
+            std::cout << "\n         node(" << mem.nodeid << ")=" << (double)mem.bytes/1024/1024/1024 << " GiB";
+        }
+    }
+
     unsigned last_node_idx = 0;
     for (auto d : c.num_io_queues) {
         auto devid = d.first;
         auto num_io_queues = d.second;
         ret.ioq_topology.emplace(devid, allocate_io_queues(topology, ret.cpus, num_io_queues, last_node_idx));
     }
+    for (auto&& item : ret.ioq_topology) {
+        dev_t dev;
+        io_queue_topology topo;
+        std::tie(dev, topo) = item;
+        std::cout << "\n       dev(" << dev << "):"
+                  << "\n         shard_to_coordinator=";
+        for (auto& i : topo.shard_to_coordinator) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinators=";
+        for (auto& i : topo.coordinators) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinator_to_idx=";
+        for (auto& i : topo.coordinator_to_idx) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinator_to_idx_valid=";
+        for (auto&& i : topo.coordinator_to_idx_valid) {
+            std::cout << i << " ";
+        }
+    }
+    std::cout << std::endl;
     return ret;
 }
 
@@ -468,6 +505,8 @@ resources allocate(configuration c) {
     resources ret;
 
     auto available_memory = ::sysconf(_SC_PAGESIZE) * size_t(::sysconf(_SC_PHYS_PAGES));
+    std::cout << "[init] allocate(hwloc=off):"
+              << "\n       available_memory=" << (double)available_memory/1024/1024/1024 << " GiB";
     auto mem = calculate_memory(c, available_memory);
     auto cpuset_procs = c.cpu_set ? c.cpu_set->size() : nr_processing_units();
     auto procs = c.cpus.value_or(cpuset_procs);
@@ -475,8 +514,37 @@ resources allocate(configuration c) {
     for (unsigned i = 0; i < procs; ++i) {
         ret.cpus.push_back(cpu{i, {{mem / procs, 0}}});
     }
+    for (auto& cpu : ret.cpus) {
+        std::cout << "\n       cpu(" << cpu.cpu_id << "):";
+        for (auto& mem : cpu.mem) {
+            std::cout << "\n         node(" << mem.nodeid << ")=" << (double)mem.bytes/1024/1024/1024 << " GiB";
+        }
+    }
 
     ret.ioq_topology.emplace(0, allocate_io_queues(c, ret.cpus));
+    for (auto&& item : ret.ioq_topology) {
+        dev_t dev;
+        io_queue_topology topo;
+        std::tie(dev, topo) = item;
+        std::cout << "\n       dev(" << dev << "):"
+                  << "\n         shard_to_coordinator=";
+        for (auto& i : topo.shard_to_coordinator) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinators=";
+        for (auto& i : topo.coordinators) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinator_to_idx=";
+        for (auto& i : topo.coordinator_to_idx) {
+            std::cout << i << " ";
+        }
+        std::cout << "\n         coordinator_to_idx_valid=";
+        for (auto&& i : topo.coordinator_to_idx_valid) {
+            std::cout << i << " ";
+        }
+    }
+    std::cout << std::endl;
     return ret;
 }
 

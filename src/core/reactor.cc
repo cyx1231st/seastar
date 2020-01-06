@@ -3665,6 +3665,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         if (configuration.count("hugepages") &&
             !configuration["network-stack"].as<std::string>().compare("native") &&
             _using_dpdk) {
+            std::cout << "[! init] reserving dpdk memory" << std::endl;
             size_t dpdk_memory = dpdk::eal::mem_size(smp::count);
 
             if (dpdk_memory >= rc.total_memory) {
@@ -3709,6 +3710,19 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
     for (auto& id : disk_config.device_ids()) {
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
+
+    std::cout << "[init] configuration:"
+              << "\n       total_memory=" << rc.total_memory.value_or(0)
+              << "\n       reserve_memory=" << rc.reserve_memory.value_or(0)
+              << "\n       cpus=" << rc.cpus.value_or(0);
+    for (auto&& qp : rc.num_io_queues) {
+      dev_t dev;
+      unsigned io_queues;
+      std::tie(dev, io_queues) = qp;
+      std::cout << "\n       dev(" << dev
+                << ")=" << io_queues;
+    }
+    std::cout << std::endl;
 
     auto resources = resource::allocate(rc);
     std::vector<resource::cpu> allocations = std::move(resources.cpus);

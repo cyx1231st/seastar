@@ -914,6 +914,11 @@ allocate_anonymous_memory(compat::optional<void*> where, size_t how_much) {
 mmap_area
 allocate_hugetlbfs_memory(file_desc& fd, compat::optional<void*> where, size_t how_much) {
     auto pos = fd.size();
+    std::cout << "[init] allocate_hugetlbfs_memory(where="
+              << "0x" << std::hex << (uint64_t)where.value_or(nullptr) << std::dec
+              << ", how_much=" << (double)how_much/1024/1024
+              << " MiB, [fd.size=" << (double)pos/1024/1024
+              << " MiB])...";
     fd.truncate(pos + how_much);
     auto ret = fd.map(
             how_much,
@@ -921,6 +926,7 @@ allocate_hugetlbfs_memory(file_desc& fd, compat::optional<void*> where, size_t h
             MAP_SHARED | MAP_POPULATE | (where ? MAP_FIXED : 0),
             pos,
             where.value_or(nullptr));
+    std::cout << " done!" << std::endl;
     return ret;
 }
 
@@ -931,11 +937,16 @@ void cpu_pages::replace_memory_backing(allocate_system_memory_fn alloc_sys_mem) 
     // place, map hugetlbfs in place, and copy it back, without modifying it during
     // the operation.
     auto bytes = nr_pages * page_size;
+    std::cout << "[init] replace_memory_backing(size="
+              << (double)bytes/1024/1024 << " MiB, nr_pages="
+              << nr_pages << ", page_size=" << page_size
+              << ")...";
     auto old_mem = mem();
     auto relocated_old_mem = mmap_anonymous(nullptr, bytes, PROT_READ|PROT_WRITE, MAP_PRIVATE);
     std::memcpy(relocated_old_mem.get(), old_mem, bytes);
     alloc_sys_mem({old_mem}, bytes).release();
     std::memcpy(old_mem, relocated_old_mem.get(), bytes);
+    std::cout << " done!" << std::endl;
 }
 
 void cpu_pages::do_resize(size_t new_size, allocate_system_memory_fn alloc_sys_mem) {
@@ -1330,7 +1341,9 @@ void configure(std::vector<resource::memory> m, bool mbind,
     if (hugetlbfs_path) {
         // std::function is copyable, but file_desc is not, so we must use
         // a shared_ptr to allow sys_alloc to be copied around
+        std::cout << "[init] making file_desc..." << std::endl;
         auto fdp = make_lw_shared<file_desc>(file_desc::temporary(*hugetlbfs_path));
+        std::cout << "[init] making file_desc done" << std::endl;
         sys_alloc = [fdp] (optional<void*> where, size_t how_much) {
             return allocate_hugetlbfs_memory(*fdp, where, how_much);
         };
@@ -1342,6 +1355,7 @@ void configure(std::vector<resource::memory> m, bool mbind,
 #ifdef SEASTAR_HAVE_NUMA
         unsigned long nodemask = 1UL << x.nodeid;
         if (mbind) {
+            std::cout << "[init] doing mbind ..." << std::endl;
             auto r = ::mbind(cpu_mem.mem() + pos, x.bytes,
                             MPOL_PREFERRED,
                             &nodemask, std::numeric_limits<unsigned long>::digits,
@@ -1353,7 +1367,11 @@ void configure(std::vector<resource::memory> m, bool mbind,
                 std::cerr << "WARNING: unable to mbind shard memory; performance may suffer: "
                         << err << std::endl;
             }
+        } else {
+            std::cout << "[! init] mbind not enabled!" << std::endl;
         }
+#else
+        std::cout << "[! init] SEASTAR_HAVE_NUMA not defined!" << std::endl;
 #endif
         pos += x.bytes;
     }

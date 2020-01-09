@@ -368,6 +368,8 @@ reactor_backend_epoll::wait_and_process(int timeout, const sigset_t* active_sigm
         return false; // gdb can cause this
     }
     assert(nr != -1);
+    //std::cout << fmt::format("[{}] wait_and_process(): got {} events...\n",
+    //                         engine().cpu_id(), nr) << std::flush;
     for (int i = 0; i < nr; ++i) {
         auto& evt = eevt[i];
         auto pfd = reinterpret_cast<pollable_fd_state*>(evt.data.ptr);
@@ -376,6 +378,8 @@ reactor_backend_epoll::wait_and_process(int timeout, const sigset_t* active_sigm
             _r->_notify_eventfd.read(dummy, 8);
             continue;
         }
+        //std::cout << fmt::format("[{}] wait_and_process():   events fd_state[{}]={:x}\n",
+        //                         engine().cpu_id(), i, (uint64_t)pfd) << std::flush;
         if (evt.events & (EPOLLHUP | EPOLLERR)) {
             // treat the events as required events when error occurs, let
             // send/recv/accept/connect handle the specific error.
@@ -395,9 +399,17 @@ reactor_backend_epoll::wait_and_process(int timeout, const sigset_t* active_sigm
             complete_epoll_event(*pfd, &pollable_fd_state::pollout, events, EPOLLOUT);
         }
         if (events_to_remove) {
+            auto prv_events = pfd->events_epoll;
             pfd->events_epoll &= ~events_to_remove;
             evt.events = pfd->events_epoll;
             auto op = evt.events ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+            seastar_logger.info(fmt::format("wait_and_process(): epoll_ctl(fd#{:x}@{:x}, ctl={}, events={}{}, prv_events={}{})",
+                                pfd->fd.get(), (uint64_t)&pfd->fd,
+                                op&EPOLL_CTL_MOD ? "MOD" : "DEL",
+                                pfd->events_epoll&EPOLLIN ? "I" : "",
+                                pfd->events_epoll&EPOLLOUT ? "O" : "",
+                                prv_events&EPOLLIN ? "I" : "",
+                                prv_events&EPOLLOUT ? "O" : "").c_str());
             ::epoll_ctl(_epollfd.get(), op, pfd->fd.get(), &evt);
         }
     }
@@ -432,10 +444,18 @@ future<> reactor_backend_epoll::get_epoll_future(pollable_fd_state& pfd,
     pfd.events_requested |= event;
     if ((pfd.events_epoll & event) != event) {
         auto ctl = pfd.events_epoll ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+        auto prv_events = pfd.events_epoll;
         pfd.events_epoll |= event;
         ::epoll_event eevt;
         eevt.events = pfd.events_epoll;
         eevt.data.ptr = &pfd;
+        seastar_logger.info(fmt::format("get_epoll_future(): epoll_ctl(fd#{:x}@{:x}, ctl={}, events={}{}, prv_events={}{})",
+                            pfd.fd.get(), (uint64_t)&pfd.fd,
+                            ctl&EPOLL_CTL_MOD ? "MOD" : "ADD",
+                            pfd.events_epoll&EPOLLIN ? "I" : "",
+                            pfd.events_epoll&EPOLLOUT ? "O" : "",
+                            prv_events&EPOLLIN ? "I" : "",
+                            prv_events&EPOLLOUT ? "O" : "").c_str());
         int r = ::epoll_ctl(_epollfd.get(), ctl, pfd.fd.get(), &eevt);
         assert(r == 0);
         engine().start_epoll();
@@ -445,19 +465,32 @@ future<> reactor_backend_epoll::get_epoll_future(pollable_fd_state& pfd,
 }
 
 future<> reactor_backend_epoll::readable(pollable_fd_state& fd) {
+    //seastar_logger.info(fmt::format("readable(): fd#{:x}@{:x}",
+    //                    fd.fd.get(), (uint64_t)&fd.fd).c_str());
     return get_epoll_future(fd, &pollable_fd_state::pollin, EPOLLIN);
 }
 
 future<> reactor_backend_epoll::writeable(pollable_fd_state& fd) {
+    //seastar_logger.info(fmt::format("writeable(): fd#{:x}@{:x}",
+    //                    fd.fd.get(), (uint64_t)&fd.fd).c_str());
     return get_epoll_future(fd, &pollable_fd_state::pollout, EPOLLOUT);
 }
 
 future<> reactor_backend_epoll::readable_or_writeable(pollable_fd_state& fd) {
+    //seastar_logger.info(fmt::format("readable_or_writeable(): fd#{:x}@{:x}",
+    //                    fd.fd.get(), (uint64_t)&fd.fd).c_str());
     return get_epoll_future(fd, &pollable_fd_state::pollin, EPOLLIN | EPOLLOUT);
 }
 
 void reactor_backend_epoll::forget(pollable_fd_state& fd) {
+    seastar_logger.info(fmt::format("deallocate/forget fd_state: fd#{:x}@{:x} [{:x},{:x})",
+                        fd.fd.get(), (uint64_t)&fd.fd,
+                        (uint64_t)&fd, (uint64_t)&fd+sizeof(fd)).c_str());
     if (fd.events_epoll) {
+        seastar_logger.info(fmt::format("forget(): epoll_ctl(fd#{:x}@{:x}, ctl=DEL, events=N/A, prv_events={}{})",
+                            fd.fd.get(), (uint64_t)&fd.fd,
+                            fd.events_epoll&EPOLLIN ? "I" : "",
+                            fd.events_epoll&EPOLLOUT ? "O" : "").c_str());
         ::epoll_ctl(_epollfd.get(), EPOLL_CTL_DEL, fd.fd.get(), nullptr);
     }
 }

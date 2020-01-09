@@ -1329,6 +1329,7 @@ reactor::posix_listen(socket_address sa, listen_options opts) {
     }
 
     file_desc fd = file_desc::socket(sa.u.sa.sa_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, specific_protocol);
+    seastar_logger.info(fmt::format("listen fd created: fd#{:x}@?", fd.get()).c_str());
     if (opts.reuse_address) {
         fd.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
     }
@@ -4378,6 +4379,12 @@ rename_scheduling_group(scheduling_group sg, sstring new_name) {
     return smp::invoke_on_all([sg, new_name] {
         engine()._task_queues[sg._id]->rename(new_name);
     });
+}
+
+void fd_state_created(const pollable_fd_state& fd) {
+    seastar_logger.info(fmt::format("fd_state created: fd#{:x}@{:x} [{:x},{:x})",
+                        fd.fd.get(), (uint64_t)&fd.fd,
+                        (uint64_t)&fd, (uint64_t)&fd+sizeof(fd)).c_str());
 }
 
 namespace internal {

@@ -46,8 +46,7 @@ public:
         explicit speculation(int epoll_events_guessed = 0) : events(epoll_events_guessed) {}
     };
     ~pollable_fd_state();
-    explicit pollable_fd_state(file_desc fd, speculation speculate = speculation())
-        : fd(std::move(fd)), events_known(speculate.events) {}
+    explicit pollable_fd_state(file_desc fd, speculation speculate = speculation());
     pollable_fd_state(const pollable_fd_state&) = delete;
     void operator=(const pollable_fd_state&) = delete;
     void speculate_epoll(int events) { events_known |= events; }

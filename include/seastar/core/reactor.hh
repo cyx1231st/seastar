@@ -752,6 +752,14 @@ pollable_fd_state::~pollable_fd_state() {
     engine().forget(*this);
 }
 
+void fd_state_created(const pollable_fd_state& fd);
+
+inline
+pollable_fd_state::pollable_fd_state(file_desc fd, speculation speculate)
+  : fd(std::move(fd)), events_known(speculate.events) {
+    fd_state_created(*this);
+}
+
 inline
 size_t iovec_len(const iovec* begin, size_t len)
 {
